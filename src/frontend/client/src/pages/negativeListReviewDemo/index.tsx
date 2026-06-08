@@ -350,7 +350,6 @@ export default function NegativeListReviewDemo() {
   });
   const [streamText, setStreamText] = useState('');
   const [selectedHistoryId, setSelectedHistoryId] = useState('current');
-  const [selectedReportNo, setSelectedReportNo] = useState<number | null>(null);
   const [nodeStatusMap, setNodeStatusMap] = useState<Record<string, NodeStatus>>({});
   const [apiStage, setApiStage] = useState('等待上传文档');
   const [apiError, setApiError] = useState('');
@@ -456,7 +455,6 @@ export default function NegativeListReviewDemo() {
     setRunState('complete');
     setApiStage(downloadUrl ? '报告已生成，可下载 DOCX' : '审查已完成');
     setSelectedHistoryId('current');
-    setSelectedReportNo(nextRows.find((row) => row.hasNegative === '有')?.no || null);
 
     if (!completionSavedRef.current) {
       completionSavedRef.current = true;
@@ -634,7 +632,6 @@ export default function NegativeListReviewDemo() {
       setProgress(3);
       setStartedAt(formatDateTime(new Date()));
       setSelectedHistoryId('current');
-      setSelectedReportNo(null);
       setApiStage('正在确认工作流配置');
 
       const flow = workflowFlow || await loadWorkflowFlow();
@@ -721,7 +718,6 @@ export default function NegativeListReviewDemo() {
     setActiveReportRows([]);
     setReportDownloadUrl('');
     setSelectedHistoryId('current');
-    setSelectedReportNo(null);
   };
 
   const handleFile = (slot: UploadSlot, file?: File) => {
@@ -746,7 +742,6 @@ export default function NegativeListReviewDemo() {
     setActiveReportRows([]);
     setReportDownloadUrl('');
     setSelectedHistoryId('current');
-    setSelectedReportNo(null);
   };
 
   const removeFile = (slot: UploadSlot) => {
@@ -780,10 +775,6 @@ export default function NegativeListReviewDemo() {
   const isBusy = runState === 'uploading' || runState === 'running' || runState === 'streaming';
   const selectedIsComplete = selectedHistory.status === 'complete';
   const selectedIsStreaming = selectedHistory.id === 'current' && (selectedHistory.status === 'streaming' || Boolean(streamText));
-  const selectedReportRow = useMemo(() => {
-    const negativeRows = selectedHistory.rows.filter((row) => row.hasNegative === '有');
-    return negativeRows.find((row) => row.no === selectedReportNo) || negativeRows[0] || null;
-  }, [selectedHistory.rows, selectedReportNo]);
   const nodeRows = workflowNodes.map((node) => ({
     ...node,
     status: selectedHistory.id === 'current' ? nodeStatusMap[node.id] || 'waiting' as NodeStatus : 'done' as NodeStatus,
@@ -873,7 +864,6 @@ export default function NegativeListReviewDemo() {
                   className={`nlr-historyItem ${selectedHistory.id === item.id ? 'is-active' : ''}`}
                   onClick={() => {
                     setSelectedHistoryId(item.id);
-                    setSelectedReportNo(item.rows.find((row) => row.hasNegative === '有')?.no || null);
                   }}
                 >
                   <span className={`nlr-historyDot ${item.status}`} />
@@ -939,50 +929,24 @@ export default function NegativeListReviewDemo() {
                   <div className="nlr-reportTable">
                     <div className="nlr-reportTableHead">
                       <span>序号</span>
-                      <span>负面清单名称</span>
+                      <span>负面清单问题</span>
                       <span>有无负面清单</span>
-                      <span>情况说明</span>
+                      <span>详细问题说明</span>
                     </div>
-                    {selectedHistory.rows.map((row) => {
-                      const actionable = row.hasNegative === '有';
-                      const selected = selectedReportRow?.no === row.no;
-                      return (
-                        <div
-                          className={[
-                            'nlr-reportRow',
-                            actionable ? 'has-negative is-actionable' : 'no-negative',
-                            selected ? 'is-selected' : '',
-                          ].join(' ')}
-                          key={row.no}
-                          onClick={() => actionable && setSelectedReportNo(row.no)}
-                          onKeyDown={(event) => {
-                            if (actionable && (event.key === 'Enter' || event.key === ' ')) {
-                              event.preventDefault();
-                              setSelectedReportNo(row.no);
-                            }
-                          }}
-                          role={actionable ? 'button' : undefined}
-                          tabIndex={actionable ? 0 : undefined}
-                        >
-                          <span>{row.no}</span>
-                          <strong>{row.name}</strong>
-                          <b>{row.hasNegative}</b>
-                          <div className="nlr-reportAction">{actionable ? '点击查看' : '无'}</div>
+                    {selectedHistory.rows.map((row) => (
+                      <div
+                        className={`nlr-reportRow ${row.hasNegative === '有' ? 'has-negative' : 'no-negative'}`}
+                        key={row.no}
+                      >
+                        <span>{row.no}</span>
+                        <strong>{row.name}</strong>
+                        <b>{row.hasNegative}</b>
+                        <div className="nlr-reportDetailCell">
+                          {row.hasNegative === '有' && row.detail ? renderDetail(row.detail) : '无'}
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
-                  <aside className="nlr-reportDetailPanel">
-                    <span>情况说明</span>
-                    {selectedReportRow ? (
-                      <>
-                        <h3>{selectedReportRow.no}. {selectedReportRow.name}</h3>
-                        <div className="nlr-detailContent">{renderDetail(selectedReportRow.detail)}</div>
-                      </>
-                    ) : (
-                      <div className="nlr-detailEmpty">该报告未发现负面清单问题。</div>
-                    )}
-                  </aside>
                 </div>
               ) : (
                 <pre className="nlr-rawReport">{streamText || '未解析到报告表格。'}</pre>
