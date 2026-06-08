@@ -1,0 +1,26 @@
+import ChatInput from "./ChatInput";
+import MessagePanne from "./MessagePanne";
+
+export default function ChatComponent({
+    stop = false,
+    debug = false,
+    logo = '',
+    clear = false,
+    questions = [],
+    form = false,
+    useName,
+    inputForm = null,
+    guideWord,
+    wsUrl,
+    onBeforSend,
+    onClickClear,
+    chat,
+    loadMore = () => { },
+    version
+}) {
+
+    return <div className="relative h-full">
+        <MessagePanne logo={logo} debug={debug} version={version} useName={useName} guideWord={guideWord} loadMore={loadMore} chat={chat}></MessagePanne>
+        <ChatInput clear={clear} questions={questions} version={version} form={form} wsUrl={wsUrl} inputForm={inputForm} onBeforSend={onBeforSend} onClickClear={onClickClear}></ChatInput>
+    </div>
+};

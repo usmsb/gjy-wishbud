@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="theme-color" content="#171717" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="Deepseek - An open source chat application with support for multiple AI models" />
+  <title>广交研</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+  </style>
+  <!-- <script src="http://192.168.2.224:9000/vditor.js" defer></script> -->
+  <script>
+    const theme = localStorage.getItem('color-theme');
+    const loadingContainerStyle = document.createElement('style');
+    let backgroundColor;
+
+    if (theme === 'dark') {
+      backgroundColor = '#0d0d0d';
+    } else if (theme === 'light') {
+      backgroundColor = '#ffffff';
+    } else if (theme === 'system') {
+      const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      backgroundColor = prefersDarkScheme ? '#0d0d0d' : '#ffffff';
+    } else {
+      backgroundColor = '#ffffff';
+    }
+
+    loadingContainerStyle.innerHTML = `
+        #loading-container {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          background-color: ${backgroundColor};
+        }
+      `;
+    document.head.appendChild(loadingContainerStyle);
+  </script>
+  <script type="module" crossorigin src="/workspace/assets/index.CBoG0B0j.js"></script>
+  <link rel="modulepreload" crossorigin href="/workspace/assets/http-client.CB1Ygcb9.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/validation.CnJpMGHU.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/markdown_highlight.B05ODV3I.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/math-katex.Bp4dFgYj.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/vendor.CAOFi7os.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/i18n.CqFeN8nB.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/locales.Y_6z6hm0.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/radix-ui.Bb7FNcpF.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/routing.D0ZXrade.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/date-utils.CHq2fTxU.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/tanstack-vendor.DYw_1lhl.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/utilities.BtMdTLLW.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/framer-motion.xaOr_8T0.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/advanced-inputs.CK6R-rWX.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/markdown-processing.DBEZfH71.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/forms.DPaaGrjQ.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/virtualization.iKSnkqxo.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/avatars.B4SmqcQF.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/headlessui.CbwNjBDn.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/animations.BYYeMcpm.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/codemirror-state.BLMdsRsF.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/codemirror-view.DOlFTx9q.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/codemirror-language.DFsPZZsj.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/codemirror-core.FdRFSN5o.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/sandpack.CQR52f7a.js">
+  <link rel="modulepreload" crossorigin href="/workspace/assets/security-ui.CJF7OTfl.js">
+  <link rel="stylesheet" crossorigin href="/workspace/assets/vendor.CXJ6xQwq.css">
+  <link rel="stylesheet" crossorigin href="/workspace/assets/index.DeFn4m6b.css">
+<link rel="manifest" href="/workspace/manifest.webmanifest" crossorigin="use-credentials"><script id="vite-plugin-pwa:register-sw" src="/workspace/registerSW.js"></script></head>
+
+<body>
+  <div id="root">
+    <div id="loading-container"></div>
+  </div>
+</body>
+
+</html>

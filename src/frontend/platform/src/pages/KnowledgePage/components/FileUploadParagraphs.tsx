@@ -1,0 +1,185 @@
+import { LoadingIcon } from "@/components/bs-icons/loading";
+import { delChunkInPreviewApi, previewFileSplitApi } from "@/controllers/API";
+import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useParams } from "react-router-dom";
+
+const FileUploadParagraphs = forwardRef(function ({ open = false, change, onChange }: any, ref) {
+    const { id } = useParams()
+    const { t } = useTranslation()
+    const paramsRef = useRef<any>(null)
+    const [loading, setLoading] = useState(false)
+    const [paragraph, setParagraph] = useState<any>({
+        fileId: '',
+        chunkId: '',
+        show: false
+    })
+
+    const [fileValue, setFileValue] = useState('')
+    const fileValueRef = useRef('')
+    const allFilesRef = useRef([])
+    const [files, setFiles] = useState([])
+
+    const fileCachesRef = useRef({})
+
+    useEffect(() => {
+        if (!open) {
+            fileValueRef.current = ''
+            fileCachesRef.current = {}
+        }
+    }, [open])
+
+    useImperativeHandle(ref, () => ({
+        load(data, files) {
+            paramsRef.current = data
+            fileCachesRef.current = {}
+
+            allFilesRef.current = files.map(el => ({
+                label: el.name,
+                value: el.file_path
+            }))
+            setFiles([...allFilesRef.current])
+            console.log(files[0].file_path, fileValueRef.current);
+
+            loadchunks(fileValueRef.current || files[0].file_path) // default first 
+        }
+    }))
+
+    const [paragraphs, setParagraphs] = useState<any>([])
+    const [previewFileUrl, setFileUrl] = useState('')
+    const [isUns, setIsUns] = useState(false)
+    const [partitions, setPartitions] = useState<any>([])
+
+
+
+    const loadchunks = async (fileValue) => {
+        if (!fileValue) return;
+        setLoading(true);
+        setFileValue(fileValue);
+        fileValueRef.current = fileValue;
+      
+        // 调用 SSE 版本的接口，传入参数和事件回调
+        const cancelFn = previewFileSplitApi(
+          { ...paramsRef.current, file_path: fileValue, cache: !!fileCachesRef.current[fileValue] },
+          (eventType, data) => {
+            switch (eventType) {
+              case 'processing':
+                // 处理中：保持 loading 状态（无需额外操作，已设置 setLoading(true)）
+                break;
+              case 'completed':
+                // 解析完成：处理结果（与原 .then() 逻辑一致）
+                setLoading(false);
+                setParagraphs(data.chunks); // data 对应原 res
+                setFileUrl(data.file_url);
+                setIsUns(data.parse_type === 'uns');
+                setPartitions(data.partitions);
+                fileCachesRef.current[fileValue] = true; // 缓存标记
+                break;
+              case 'error':
+                // 解析错误：关闭 loading 并处理错误
+                setLoading(false);
+                console.error('文件解析失败：', data.code, data.message);
+                // 可添加错误提示：如 message.error(data.message)
+                break;
+              case 'canceled':
+                // 被新请求取消：关闭 loading
+                setLoading(false);
+                break;
+            }
+          }
+        );
+      };
+
+    const handleSelectSearch = (e: any) => {
+        const value = e.target.value
+        if (!value) return setFiles([...allFilesRef.current])
+        // 按label查找
+        const res = allFilesRef.current.filter(el => el.label.indexOf(value) !== -1 || el.value === fileValue)
+        setFiles(res)
+    }
+
+    const handleReload = () => {
+        setLoading(true)
+        onChange(false)
+        fileCachesRef.current = {}
+
+        // loadchunks(fileValue)
+    }
+
+    // const handleDeleteChunk = async (data) => {
+    //     await captureAndAlertRequestErrorHoc(delChunkInPreviewApi({
+    //         knowledge_id: id,
+    //         file_path: fileValue,
+    //         text: data.text,
+    //         chunk_index: data.metadata.chunk_index
+    //     }))
+    //     const res = paragraphs.filter(el => el.metadata.chunk_index !== data.metadata.chunk_index)
+    //     setParagraphs(res)
+    // }
+
+    if (!open) return null
+
+    if (loading) return (
+        <div className="absolute left-0 top-0 z-10 flex h-full w-full items-center justify-center bg-[rgba(255,255,255,0.6)] dark:bg-blur-shared">
+            <LoadingIcon />
+        </div>
+    )
+
+
+    return {/* 原预览页面，暂时无用
+        <div className="flex gap-2">
+            <SelectSearch value={fileValue} options={files}
+                selectPlaceholder=''
+                inputPlaceholder=''
+                selectClass="w-64"
+                onChange={handleSelectSearch}
+                onValueChange={(val) => {
+                    loadchunks(val)
+                }}>
+            </SelectSearch>
+            <div className={`${change ? '' : 'hidden'} flex items-center`}>
+                <Info className='mr-1 text-red-500' />
+                <span className="text-red-500">{t('policyChangeDetected', { ns: 'knowledge' })}</span>
+                <span className="text-primary cursor-pointer" onClick={handleReload}>{t('regeneratePreview', { ns: 'knowledge' })}</span>
+            </div>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2 min-w-[770px]">
+            {
+                paragraphs.map(item => (
+                    <ParagraphsItem
+                        key={item.text}
+                        disabled={change}
+                        data={item}
+                        onDeled={handleDeleteChunk}
+                        onEdit={() => {
+                            setParagraph({
+                                fileId: item.metadata.file_id,
+                                chunkId: item.metadata.chunk_index,
+                                show: true
+                            })
+                        }} />
+                ))
+            }
+        </div>
+        <Dialog open={paragraph.show} onOpenChange={(show) => setParagraph({ ...paragraph, show })}>
+            <DialogContent close={false} className='size-full max-w-full sm:rounded-none p-0 border-none'>
+                <ParagraphEdit
+                    chunks={paragraphs}
+                    partitions={partitions}
+                    isUns={isUns}
+                    oriFilePath={fileValue}
+                    filePath={previewFileUrl}
+                    fileId={paragraph.fileId}
+                    chunkId={paragraph.chunkId}
+                    onClose={() => setParagraph({ ...paragraph, show: false })}
+                    onChange={(val) => setParagraphs(paragraphs.map(item =>
+                        item.metadata.chunk_index === paragraph.chunkId ? { ...item, text: val } : item))
+                    }
+                />
+            </DialogContent>
+        </Dialog> */}
+
+});
+
+export default FileUploadParagraphs

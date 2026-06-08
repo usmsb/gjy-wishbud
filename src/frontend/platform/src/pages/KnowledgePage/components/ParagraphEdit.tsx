@@ -1,0 +1,395 @@
+import FileView from "@/components/bs-comp/FileView";
+import { LoadIcon } from "@/components/bs-icons";
+import { Button } from "@/components/bs-ui/button";
+import { useToast } from "@/components/bs-ui/toast/use-toast";
+import { getFileBboxApi, getFilePathApi, getKnowledgeChunkApi, updateChunkApi, updatePreviewChunkApi } from "@/controllers/API";
+import { captureAndAlertRequestErrorHoc } from "@/controllers/request";
+import { Crosshair, Info, X } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from "react-i18next";
+import { useParams } from "react-router-dom";
+import DocxPreview from "./DocxFileViewer";
+import Guide from "./Guide";
+import Markdown from './Markdown';
+import TxtFileViewer from "./TxtFileViewer";
+
+// 上传预览时携带chunks
+const ParagraphEdit = ({
+    edit = true,
+    chunks = null,
+    partitions = null,
+    oriFilePath = '',
+    isUns = true,
+    filePath = '',
+    parseType = '',
+    fileId,
+    chunkId,
+    onClose,
+    onChange
+}) => {
+    const { id } = useParams();
+    const [value, setValue] = useState('');
+    const [data, setData] = useState([]);
+    const prevOvergapData = useRef(null);
+    const { t } = useTranslation('knowledge')
+    const labelTextRef = useRef<any>(partitions);
+
+    const [previewFileUrl, setFileUrl] = useState('')
+    useEffect(() => {
+        chunks ? setFileUrl(filePath) : getFilePathApi(fileId).then(setFileUrl)
+    }, [fileId, filePath, chunks])
+
+    const [fileName, setFileName] = useState('')
+    const suffix = useMemo(() => {
+        return fileName.split('.').pop().toLowerCase()
+    }, [fileName])
+
+    const initData = async (res) => {
+
+        if (!partitions) {
+            await getFileBboxApi(fileId).then(res => {
+                labelTextRef.current = res
+            })
+        }
+
+        let value = ''
+        const allLabels = convertJsonData(labelTextRef.current)
+
+        const activeIds = new Set()
+        res.data.forEach(chunk => {
+            const { bbox, chunk_index } = chunk.metadata
+            if (chunk_index === chunkId) {
+                const labels = bbox && JSON.parse(bbox).chunk_bboxes || []
+                labels.forEach(label => {
+                    const id = [label.page, ...label.bbox].join('-');
+                    activeIds.add(id)
+                })
+
+                value = chunk.text
+            }
+        })
+
+        const labelsData = allLabels.map((label) => {
+            return {
+                ...label,
+                active: activeIds.has(label.id)
+            }
+        })
+
+
+        setFileName(res.data[0].metadata.source)
+        setData(labelsData)
+        prevOvergapData.current = labelsData
+        setValue(value)
+        // 自动滚动到当前chunk
+        setRandom(Math.random() / 10000)
+    }
+    useEffect(() => {
+        chunks ? initData({ data: chunks }) : getKnowledgeChunkApi({ knowledge_id: id, file_ids: [fileId], limit: 1000 }).then(initData)
+    }, [])
+
+    const markDownRef = useRef(null)
+    const { leftPanelWidth, handleMouseDown } = useDragSize(!isUns)
+    const [labelChange, setLabelChange] = useState(false)
+    const { message } = useToast()
+
+    const [loading, setLoading] = useState(false)
+    const handleSave = async () => {
+        const _value = markDownRef.current.getValue().trim()
+        setValue(_value)
+        if (!_value) return
+
+        const bbox = {
+            chunk_bboxes: prevOvergapData.current.reduce((arr, item) => {
+                if (item.active) {
+                    arr.push({ page: item.page, bbox: item.label })
+                }
+                return arr
+            }, [])
+        }
+
+        setLoading(true)
+
+        const promise = chunks ? updatePreviewChunkApi({
+            knowledge_id: Number(id), file_path: oriFilePath, chunk_index: chunkId, text: _value, bbox: JSON.stringify(bbox)
+        }) : updateChunkApi({
+            knowledge_id: Number(id), file_id: fileId, chunk_index: chunkId, text: _value, bbox: JSON.stringify(bbox)
+        })
+        await captureAndAlertRequestErrorHoc(promise.then(res => {
+            message({ variant: 'success', description: t('editSuccess') })
+            onClose()
+            onChange(_value)
+        }))
+        setLoading(false)
+    }
+
+    const labels = useMemo(() => {
+        return data.reduce((acc, item) => {
+            if (!acc[item.page]) {
+                acc[item.page] = [];
+            }
+            acc[item.page].push({ ...item });
+
+            return acc;
+        }, {});
+    }, [data]);
+
+    const handleSelectLabels = (lbs) => {
+        if (!edit) return
+        // 相同的partId同时被选中
+        const distinct = {}
+        const selectLabels = lbs.reduce((res, item) => {
+            const { id, active } = item
+            const partId = labelTextRef.current[id].part_id
+            if (distinct[partId]) return res // same partId
+            distinct[partId] = true
+            Object.keys(labelTextRef.current).forEach((key) => {
+                if (labelTextRef.current[key].part_id === partId) {
+                    res.push({ id: key, active })
+                }
+            })
+            return res
+        }, [])
+
+        let arr = data
+        selectLabels.forEach((item) => {
+            arr = arr.map(el => el.id === item.id ? { ...el, active: item.active } : el)
+        })
+        setData(arr)
+        // console.log('arr :>> ', lbs, arr);
+
+        setLabelChange(true)
+    }
+
+    const handleOvergap = () => {
+        setLabelChange(false)
+        let prevType = ''
+        let prevPartId = ''
+        let str = ''
+        // 标注块拼接段落
+        data.forEach((item, index) => {
+            if (typeof labelTextRef.current[item.id] === 'string') return window.alter('文件已失效，传个新的在测试')
+            if (item.active) {
+                const { text, type, part_id } = labelTextRef.current[item.id]
+                if (str === '') {
+                    // 第一个块, title类型，末尾加单换行
+                    str += text + (type === 'Title' ? '\n' : '')
+                } else {
+                    // 非第一个块
+                    if (prevPartId === part_id) {
+                        // 上一个和当前是同一段落
+                        str += text
+                    } else if (prevType === 'Table' || type === 'Table' || (type === 'Title' && prevType !== type)) {
+                        // 上一个是表格 or 当前是表格 or 当前是title并上一个不是title
+                        str += '\n\n' + text
+                    } else {
+                        str += '\n' + text
+                    }
+                }
+
+                prevType = type
+                prevPartId = part_id
+            }
+        })
+        console.log('JSON. :>> ', JSON.stringify(str));
+        setValue(str)
+        markDownRef.current.setValue(str) // fouceupdate
+        prevOvergapData.current = data
+    }
+
+    const [random, setRandom] = useState(0)
+    const postion = useMemo(() => {
+        const target = data.find(el => el.active)
+        return target ? [target.page, target.label[1] + random] : [1, 0]
+    }, [random])
+
+    const [showPos, setShowPos] = useState(false)
+    const handlePageChange = (offset, h, paperSize, scale) => {
+        if (offset === 0) return
+        // console.log('data :>> ', data, offset, h, paperSize, scale);
+        setShowPos(!data.some(item => {
+            const pageHeight = (item.page - 1) * paperSize
+            const labelTop = pageHeight + item.label[1] / scale
+            return item.active && labelTop > offset && labelTop < (offset + h)
+        }))
+    }
+
+    const fileView = () => {
+        const newVersion = ['etl4lm', 'un_etl4lm'].includes(parseType)
+        if (!newVersion) return previewFileUrl && <FileView
+            select
+            fileUrl={previewFileUrl}
+            labels={labels}
+            scrollTo={postion}
+            onSelectLabel={handleSelectLabels}
+            onPageChange={handlePageChange}
+        />
+        switch (suffix) {
+            case 'ppt':
+            case 'pptx':
+            case 'pdf':
+                return previewFileUrl && <FileView
+                    select
+                    startIndex={0}
+                    fileUrl={previewFileUrl}
+                    labels={labels}
+                    scrollTo={postion}
+                    onSelectLabel={handleSelectLabels}
+                    onPageChange={handlePageChange}
+                />
+            case 'txt': return <TxtFileViewer filePath={previewFileUrl} />
+            case 'md': return <TxtFileViewer markdown filePath={previewFileUrl} />
+            case 'html': return <TxtFileViewer html filePath={previewFileUrl} />
+            case 'doc':
+            case 'docx': return <DocxPreview filePath={previewFileUrl} />
+            case 'png':
+            case 'jpg':
+            case 'jpeg':
+            case 'bmp': return <img
+                className="border"
+                src={previewFileUrl.replace(/https?:\/\/[^\/]+/, __APP_ENV__.BASE_URL)} alt="" />
+            default:
+                return <div className="flex justify-center items-center h-full text-gray-400">
+                    <div className="text-center">
+                        <img
+                            className="size-52 block"
+                            src={__APP_ENV__.BASE_URL + "/assets/knowledge/damage.svg"} alt="" />
+                        <p>此文件类型不支持预览</p>
+                    </div>
+                </div>
+        }
+    }
+
+    return (
+        <div className="flex px-4 py-2 select-none">
+            {/* left */}
+            <div className="relative" style={{ width: leftPanelWidth }}>
+                <Markdown ref={markDownRef} edit={edit} isUns={isUns} title={fileName} q={chunkId + 1} value={value} />
+                {!value && <p className="absolute left-0 text-red-500 text-xs mt-2">{t('inputNotEmpty')}</p>}
+                {!isUns && <div className="flex justify-end gap-4">
+                    <Button className="px-6 h-8" variant="outline" onClick={onClose}>{t('cancel', { ns: 'bs' })}</Button>
+                    <Button className="px-6 h-8" disabled={loading} onClick={handleSave}><LoadIcon className={`mr-1 ${loading ? '' : 'hidden'}`} />{t('save', { ns: 'bs' })}</Button>
+                </div>}
+            </div>
+            {isUns && <>
+                {/* drag line */}
+                <div className="h-full p-2">
+                    <div
+                        className="h-full w-1 border cursor-ew-resize"
+                        onMouseDown={handleMouseDown}
+                    ></div>
+                </div>
+                {/* right */}
+                <div className="flex-1 min-w-0 w-0">
+                    {/* head */}
+                    <div className="flex justify-between items-center relative h-10 mb-2 text-sm">
+                        <span>{fileName}</span>
+                        <div className={`${labelChange ? '' : 'hidden'} flex items-center`}>
+                            <Info className='mr-1 text-red-500' />
+                            <span className="text-red-500">{t('segmentRangeDetected')}</span>
+                            <span className="text-primary cursor-pointer" onClick={handleOvergap}>{t('overwriteSegment')}</span>
+                        </div>
+                        <div className="flex justify-end gap-4">
+                            {edit && <Button className="px-6 h-8" variant="outline" onClick={onClose}>{t('cancel', { ns: 'bs' })}</Button>}
+                            {edit && <Button className="px-6 h-8" disabled={loading} onClick={handleSave}><LoadIcon className={`mr-1 ${loading ? '' : 'hidden'}`} />{t('save', { ns: 'bs' })}</Button>}
+                            {!edit && <X className="cursor-pointer size-5 text-gray-500" onClick={onClose} />}
+                        </div>
+                    </div>
+                    {/* file view */}
+                    <div className="bg-gray-100 relative">
+                        {showPos && value && Object.keys(labels).length !== 0 && <Button className="absolute top-2 right-2 z-10 bg-background" variant="outline" onClick={() => setRandom(Math.random() / 10000)}><Crosshair className="mr-1" size={16} />{t('backToPosition')}</Button>}
+                        <div className="h-[calc(100vh-104px)] overflow-auto"
+                            style={{
+                                width: 'calc(100vh - 104px)',
+                                minWidth: '100%',
+                            }}>
+                            {
+                                fileView()
+                            }
+                        </div>
+                    </div>
+                </div>
+            </>}
+            <Guide />
+        </div>
+    );
+};
+
+const useDragSize = (full) => {
+    const [leftPanelWidth, setLeftPanelWidth] = useState(full ? '100%' : window.innerWidth * 0.4);
+    const [isDragging, setIsDragging] = useState(false);
+
+    const handleMouseDown = useCallback(() => {
+        setIsDragging(true);
+    }, []);
+
+    const handleMouseUp = useCallback(() => {
+        setIsDragging(false);
+    }, []);
+
+    const handleMouseMove = useCallback(
+        (e) => {
+            if (isDragging) {
+                const newWidth = e.clientX - 24;
+                if (newWidth >= 320 && newWidth <= window.innerWidth * 0.7) {
+                    setLeftPanelWidth(newWidth);
+                }
+            }
+        },
+        [isDragging]
+    );
+
+    React.useEffect(() => {
+        if (full) return
+        if (isDragging) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        } else {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [full, isDragging, handleMouseMove, handleMouseUp]);
+
+    return { leftPanelWidth, handleMouseDown };
+}
+
+// JSON数据转换函数
+export const convertJsonData = (inputObj: Record<string, any>) => {
+    try {
+        const result = []
+
+        // 遍历输入对象的每个键值对
+        for (const [key, value] of Object.entries(inputObj)) {
+            // 解析 key 获取 page 和 label
+            const keyParts = key.split('-')
+            const page = parseInt(keyParts[0])
+            const label = keyParts.slice(1).map(num => parseInt(num))
+
+            result.push({
+                id: key,
+                label: label,
+                page: page,
+                txt: value.text,
+                part_id: value.part_id // 保留用于排序
+            })
+        }
+
+        // 按 part_id 从小到大排序
+        result.sort((a, b) => a.part_id - b.part_id)
+
+        // 移除临时的 part_id 字段
+        const finalResult = result.map(({ part_id, ...rest }) => rest)
+
+        return finalResult
+    } catch (error) {
+        console.error('数据转换错误:', error)
+        return []
+    }
+}
+
+export default ParagraphEdit;

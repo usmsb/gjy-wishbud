@@ -1,0 +1,60 @@
+FROM python:3.10-slim-bookworm
+
+ARG PANDOC_ARCH=amd64
+ENV PANDOC_ARCH=$PANDOC_ARCH
+ENV PATH="${PATH}:/root/.local/bin"
+
+WORKDIR /app
+
+# 安装依赖（使用国内阿里云镜像源，合并安装步骤）
+RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update --allow-releaseinfo-change && \
+    apt-get install -y --no-install-recommends \
+    gcc g++ curl build-essential libreoffice \
+    wget procps vim fonts-wqy-zenhei \
+    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# 安装 pandoc
+RUN mkdir -p /opt/pandoc && \
+    cd /opt/pandoc && \
+    wget https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-${PANDOC_ARCH}.tar.gz && \
+    tar xvf pandoc-3.6.4-linux-${PANDOC_ARCH}.tar.gz && \
+    cp pandoc-3.6.4/bin/pandoc /usr/bin/ && \
+    rm -rf /opt/pandoc
+
+# 安装 uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 安装 Poetry
+#RUN curl -sSL https://install.python-poetry.org | python3 - --version 1.8.2
+
+# 拷贝项目依赖文件
+COPY ./pyproject.toml ./
+
+# 安装 Python 依赖
+RUN python -m pip install --upgrade pip && \
+    uv pip compile pyproject.toml --output-file requirements.txt && \
+    uv pip install -r requirements.txt --system --no-cache-dir && \
+    uv cache clean
+
+
+
+#RUN python -m pip install --upgrade pip && \
+#    pip install shapely==2.0.1 && \
+#    poetry config virtualenvs.create false && \
+#    poetry install --no-interaction --no-ansi --without dev
+
+# 安装 NLTK 数据
+RUN python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab'); nltk.download('averaged_perceptron_tagger'); nltk.download('averaged_perceptron_tagger_eng')"
+
+# 安装 playwright chromium
+RUN playwright install chromium && playwright install-deps
+
+COPY . .
+
+CMD ["sh", "entrypoint.sh"]
+

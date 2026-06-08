@@ -1,0 +1,80 @@
+knowledges: # 知识库相关配置
+  etl4lm:
+    # 文档解析模型服务配置，包括OCR、版式分析、表格识别、公式识别等
+    url: ""  # http://192.168.106.12:8180/v1/etl4llm/predict
+    timeout: 600
+    # OCR SDK服务地址，默认为空则使用ETL4LM自带的轻量OCR模型（速度快，对于困难场景效果一般），若填写OCR SDK服务地址则使用高精度的OCR模型。
+    ocr_sdk_url: ""
+
+llm_request:
+  # 控制技能 LLM 组件模型访问的超时配置, 以下是默认值
+  request_timeout: 600
+  max_retries: 1
+
+default_operator:
+  # 使用免登录链接的方式需要配置，因为免登录链接相当于不知道用户信息，我们系统会自动把这些行为记录到某个用户头上，这里用来配置该用户的id
+  user: 1
+  enable_guest_access: true # 免登录链接是否可访问
+
+# 密码安全相关配置
+password_conf:
+  # 密码超过X天必须进行修改, 登录提示重新修改密码。大于0策略才生效
+  password_valid_period: 200
+  # 登录错误时间窗口,单位分钟。在错误时间窗口内超过最大错误次数会封禁用户，password_valid_period和login_error_time_window都大于0才生效
+  login_error_time_window: 5
+  # 最大错误次数，超过后会封禁用户，大于0时生效
+  max_error_times: 0
+
+system_login_method:
+  # 是否允许多点登录
+  allow_multi_login: true
+  # sso系统登录配置（毕昇商业扩展套件功能，开源版无需配置）
+  gateway_login: false # 是否开启sso登录
+  admin_username: admin # 从 SSO/LDAP 注册的管理员用户名
+
+# 登陆页面是否需要输入验证码，可设置为True或False
+use_captcha: True
+
+# 会话窗口底部提示文案
+dialog_tips:
+  "内容由AI生成，仅供参考！"
+
+env:
+  # 聊天窗口快捷搜索功能使用的搜索引擎，默认为百度，可以配置为内部文档搜索
+  # dialog_quick_search: http://www.baidu.com/s?wd=
+  # 当用户的环境前面的网关，不能在同一个端口上既有http又有socket时，需要这个配置，将两个请求区分开，默认可以不用
+  # websocket_url: 192.168.106.120:3003
+  office_url: http://IP:8701 # onlyoffice 组件地址，需要浏览器能直接访问
+  # 是否展示前端界面上的github和帮助链接
+  show_github_and_help: true
+  # 是否开启注册
+  enable_registration: true
+  # 前端上传文件的最大限制，单位MB
+  uploaded_files_maximum_size: 50
+
+workflow:
+  # 节点运行最大步数
+  max_steps: 50
+  # 等待用户输入的超时时间，单位分钟
+  timeout: 5
+
+# 灵思模块相关配置
+linsight:
+  # 历史记录中工具消息的最大token，超过后需要总结下历史记录
+  tool_buffer: 100000
+  # 单个任务最大执行步骤数，防止死循环
+  max_steps: 200
+  # 灵思任务执行过程中模型调用重试次数
+  retry_num: 3
+  # 灵思任务执行过程中模型调用重试间隔时间（秒）
+  retry_sleep: 5
+  # 生成SOP时，prompt里放的用户上传文件信息的数量
+  max_file_num: 5
+  # 生成SOP时，prompt里放的组织知识库的最大数量
+  max_knowledge_num: 20
+  # 拆分二级任务时读取文件内容的字符数，超过后会截断
+  file_content_length: 5000
+  # 灵思模型默认温度
+  default_temperature: 0
+  # 模型json格式失败重试时的温度
+  retry_temperature: 1
