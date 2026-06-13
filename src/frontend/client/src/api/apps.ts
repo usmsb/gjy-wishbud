@@ -89,12 +89,12 @@ export const disLikeCommentApi = (message_id, comment) => {
 /**
  * 技能 工作流详情
  */
-export async function getChatHistoryApi({ flowId, chatId, flowType, id, shareToken }
-    : { flowId: string, chatId: string, flowType: string, id?: number, shareToken?: string }): Promise<any> {
+export async function getChatHistoryApi({ flowId, chatId, flowType, id, shareToken, pageSize = 40 }
+    : { flowId: string, chatId: string, flowType: string, id?: number, shareToken?: string, pageSize?: number }): Promise<any> {
     const filterFlowMsg = (data) => {
         return data.filter(item =>
-            ["question", "output_with_input_msg", "output_with_choose_msg", "stream_msg", "output_msg", "guide_question", "guide_word", "node_run", "answer"].includes(item.category)
-            && (item.message || item.reasoning_log))
+            ["question", "output_with_input_msg", "output_with_choose_msg", "stream_msg", "output_msg", "guide_question", "guide_word", "node_run", "answer", "report"].includes(item.category)
+            && (item.message || item.reasoning_log || item.files))
     }
 
     const filterSkillMsg = (data) => {
@@ -105,7 +105,7 @@ export async function getChatHistoryApi({ flowId, chatId, flowType, id, shareTok
 
     const headers = shareToken ? { 'share-token': shareToken } : {}
 
-    return await request.get(`/api/v1/chat/history?flow_id=${flowId}&chat_id=${chatId}&page_size=40&id=${id || ''}`, {
+    return await request.get(`/api/v1/chat/history?flow_id=${flowId}&chat_id=${chatId}&page_size=${pageSize}&id=${id || ''}`, {
         headers
     }).then(res => {
         if (res.status_code !== 200) return []
@@ -146,6 +146,28 @@ export async function getChatHistoryApi({ flowId, chatId, flowType, id, shareTok
             }
         })
     });
+}
+
+export async function getChatSessionListApi({
+    page = 1,
+    limit = 100,
+    flowId,
+    flowType,
+}: {
+    page?: number;
+    limit?: number;
+    flowId?: string;
+    flowType?: number;
+}): Promise<any> {
+    const query = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+    });
+
+    if (flowId) query.append('flow_id', flowId);
+    if (typeof flowType === 'number') query.append('flow_type', String(flowType));
+
+    return await request.get(`/api/v1/chat/list?${query.toString()}`);
 }
 
 

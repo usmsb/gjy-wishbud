@@ -1,5 +1,7 @@
 import os
+import re
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import IO, Dict, List, Any, Tuple
 from urllib.parse import unquote, urlparse
@@ -7,7 +9,7 @@ from urllib.parse import unquote, urlparse
 import pandas as pd
 import requests
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Emu, Inches
 from loguru import logger
 
 from bisheng.core.storage.minio.minio_manager import get_minio_storage_sync
@@ -40,10 +42,17 @@ class DocxTemplateRender(object):
         else:
             self.doc = Document(self.file_content)
 
-    def _set_paragraph_text_with_breaks(self, paragraph, text: Any):
-        """Set paragraph text while preserving embedded line breaks in Word."""
+    def _normalize_text_line_breaks(self, text: Any) -> str:
+        """Normalize plain and HTML line breaks before writing text to Word."""
         normalized_text = "" if text is None else str(text)
         normalized_text = normalized_text.replace("\r\n", "\n").replace("\r", "\n")
+        normalized_text = re.sub(r"&lt;br\s*/?&gt;", "\n", normalized_text, flags=re.IGNORECASE)
+        normalized_text = re.sub(r"<br\s*/?>", "\n", normalized_text, flags=re.IGNORECASE)
+        return normalized_text
+
+    def _set_paragraph_text_with_breaks(self, paragraph, text: Any):
+        """Set paragraph text while preserving embedded line breaks in Word."""
+        normalized_text = self._normalize_text_line_breaks(text)
         lines = normalized_text.split("\n")
 
         paragraph.clear()
@@ -460,13 +469,21 @@ class DocxTemplateRender(object):
                 elif resource_info['type'] in ['excel', 'csv', 'markdown_table']:
                     # 表格内联处理：在当前位置插入表格，然后为后续内容创建新段落
                     if resource_info['type'] == 'markdown_table':
-                        table_data, alignments = self._markdown_table_to_data(resource_info["content"])
+                        if resource_info.get("content"):
+                            table_data, alignments = self._markdown_table_to_data(resource_info["content"])
+                        else:
+                            table_data = resource_info.get('table_data', [["表格数据解析失败"]])
+                            alignments = resource_info.get('alignments')
                     else:
                         table_data = resource_info.get('table_data', [["表格数据解析失败"]])
-                        alignments = None
+                        alignments = resource_info.get('alignments')
 
                     # 在当前段落后立即插入表格
-                    table_element = self._create_table_element(table_data)
+                    table_element = self._create_table_element(
+                        table_data,
+                        alignments=alignments,
+                        table_type=resource_info.get("resource_type") or resource_info["type"],
+                    )
 
                     # 获取当前段落在文档中的位置
                     paragraph_element = current_paragraph._element
@@ -1124,13 +1141,162 @@ class DocxTemplateRender(object):
             paragraph.add_run(f"[表格插入失败: {str(e)}]")
             logger.error(f"插入表格失败: {str(e)}")
 
-    def _fill_and_style_table(self, table, table_data: List[List[str]]):
+    def _get_available_table_width(self):
+        try:
+            section = self.doc.sections[-1]
+            available_width = int(section.page_width) - int(section.left_margin) - int(section.right_margin)
+            if available_width > 0:
+                return available_width
+        except Exception:
+            pass
+
+        return int(Inches(6.5))
+
+    def _get_text_display_width(self, text: Any) -> float:
+        normalized_text = self._normalize_text_line_breaks(text)
+
+        image_placeholder_count = len(re.findall(r"__RESOURCE_\d{4}__", normalized_text))
+        normalized_text = re.sub(r"__RESOURCE_\d{4}__", "", normalized_text)
+
+        line_widths = []
+        for line in normalized_text.split("\n"):
+            width = 0.0
+            for char in line:
+                if char == "\t":
+                    width += 4
+                elif unicodedata.east_asian_width(char) in ("F", "W"):
+                    width += 2
+                else:
+                    width += 1
+            line_widths.append(width)
+
+        visible_width = max(line_widths or [0])
+        if image_placeholder_count:
+            visible_width = max(visible_width, image_placeholder_count * 12)
+
+        return visible_width
+
+    def _calculate_column_widths(self, table_data: List[List[str]], cols: int) -> List[int]:
+        if cols <= 0:
+            return []
+
+        total_width = self._get_available_table_width()
+        if cols == 1:
+            return [total_width]
+
+        weights = []
+        for col_idx in range(cols):
+            column_widths = []
+            filled_cells = 0
+            numeric_cells = 0
+            has_image = False
+
+            for row_idx, row in enumerate(table_data):
+                cell_data = row[col_idx] if row and col_idx < len(row) else ""
+                cell_text = "" if cell_data is None else str(cell_data)
+                cell_width = self._get_text_display_width(cell_text)
+
+                if row_idx == 0:
+                    cell_width *= 1.2
+
+                if "__RESOURCE_" in cell_text:
+                    has_image = True
+
+                if cell_text.strip():
+                    filled_cells += 1
+                    if self._is_number(cell_text.strip()):
+                        numeric_cells += 1
+
+                column_widths.append(cell_width)
+
+            max_width = max(column_widths or [0])
+            avg_width = sum(column_widths) / len(column_widths) if column_widths else 0
+            weight = max(max_width, avg_width * 1.35, 4)
+
+            if has_image:
+                weight = max(weight, 14)
+
+            if filled_cells and numeric_cells / filled_cells >= 0.75:
+                weight = max(weight * 0.75, 6)
+
+            weights.append(min(weight, 80))
+
+        return self._normalize_column_widths(weights, total_width)
+
+    def _normalize_column_widths(self, weights: List[float], total_width: int) -> List[int]:
+        cols = len(weights)
+        if cols == 0:
+            return []
+
+        avg_width = total_width / cols
+        min_width = int(min(Inches(0.7), avg_width * 0.75))
+        max_width = int(total_width * (0.58 if cols <= 3 else 0.45))
+        max_width = max(max_width, min_width)
+
+        remaining_indices = set(range(cols))
+        remaining_width = total_width
+        widths = [0] * cols
+
+        while remaining_indices:
+            remaining_weight = sum(weights[idx] for idx in remaining_indices) or len(remaining_indices)
+            changed = False
+
+            for idx in list(remaining_indices):
+                proposed_width = int(remaining_width * weights[idx] / remaining_weight)
+                if proposed_width < min_width:
+                    widths[idx] = min_width
+                    remaining_width -= min_width
+                    remaining_indices.remove(idx)
+                    changed = True
+                elif len(remaining_indices) > 1 and proposed_width > max_width:
+                    widths[idx] = max_width
+                    remaining_width -= max_width
+                    remaining_indices.remove(idx)
+                    changed = True
+
+            if not changed:
+                for idx in remaining_indices:
+                    widths[idx] = int(remaining_width * weights[idx] / remaining_weight)
+                break
+
+        delta = total_width - sum(widths)
+        if widths:
+            widths[-1] += delta
+
+        return widths
+
+    def _apply_table_column_widths(self, table, column_widths: List[int]):
+        if not column_widths:
+            return
+
+        table.autofit = False
+        for col_idx, width_emu in enumerate(column_widths):
+            width = Emu(max(1, int(width_emu)))
+            try:
+                table.columns[col_idx].width = width
+            except Exception:
+                pass
+
+            for cell in table.columns[col_idx].cells:
+                cell.width = width
+
+    def _paragraph_alignment_from_value(self, alignment: str):
+        if alignment == "center":
+            return 1
+        if alignment == "right":
+            return 2
+        return 0
+
+    def _fill_and_style_table(self, table, table_data: List[List[str]], alignments: List[str] = None,
+                              table_type: str = None):
         """
         填充表格数据并设置样式
         
         Args:
             table: Word表格对象
             table_data: 表格数据
+            alignments: Markdown列对齐信息
+            table_type: 表格类型
         """
         rows = len(table_data)
         # 计算最大列数，考虑到可能有空行的情况
@@ -1164,19 +1330,22 @@ class DocxTemplateRender(object):
                 # 设置单元格对齐方式
                 cell_paragraphs = cell.paragraphs
                 if cell_paragraphs:
-                    # 数字右对齐，文本左对齐
-                    cell_text = str(cell_data).strip()
-                    if self._is_number(cell_text):
+                    if alignments and j < len(alignments):
+                        cell_paragraphs[0].alignment = self._paragraph_alignment_from_value(alignments[j])
+                    elif self._is_number(str(cell_data).strip()):
                         cell_paragraphs[0].alignment = 2  # 右对齐
                     else:
                         cell_paragraphs[0].alignment = 0  # 左对齐
 
         # 设置表头样式（第一行）
         if rows > 0:
-            for cell in table.rows[0].cells:
+            for col_idx, cell in enumerate(table.rows[0].cells):
                 # 表头居中对齐
                 for paragraph in cell.paragraphs:
-                    paragraph.alignment = 1  # 居中对齐
+                    if alignments and col_idx < len(alignments):
+                        paragraph.alignment = self._paragraph_alignment_from_value(alignments[col_idx])
+                    else:
+                        paragraph.alignment = 1  # 居中对齐
                     for run in paragraph.runs:
                         run.bold = True
 
@@ -1193,13 +1362,12 @@ class DocxTemplateRender(object):
                 except Exception:
                     pass  # 如果设置背景色失败，继续执行
 
-        # 自动调整列宽
         try:
-            table.autofit = True
-            # 设置表格宽度为页面宽度
-            from docx.shared import Inches
-
-            table.width = Inches(6.5)  # 约A4页面宽度
+            if table_type == "markdown_table":
+                column_widths = self._calculate_column_widths(table_data, cols)
+                self._apply_table_column_widths(table, column_widths)
+            else:
+                table.autofit = True
         except Exception:
             pass
 
@@ -1216,14 +1384,17 @@ class DocxTemplateRender(object):
         except Exception:
             pass
 
-        logger.info(f"成功设置表格样式和数据，大小: {rows}x{cols}")
+        logger.info(f"成功设置表格样式和数据，大小: {rows}x{cols}, 类型: {table_type or 'default'}")
 
-    def _create_table_element(self, table_data: List[List[str]]):
+    def _create_table_element(self, table_data: List[List[str]], alignments: List[str] = None,
+                              table_type: str = None):
         """
         创建表格元素
         
         Args:
             table_data: 表格数据 [[row1_col1, row1_col2], [row2_col1, row2_col2]]
+            alignments: Markdown列对齐信息
+            table_type: 表格类型
         
         Returns:
             表格元素
@@ -1251,7 +1422,7 @@ class DocxTemplateRender(object):
             table = self.doc.add_table(rows=rows, cols=cols)
 
             # 填充表格数据并设置样式
-            self._fill_and_style_table(table, table_data)
+            self._fill_and_style_table(table, table_data, alignments=alignments, table_type=table_type)
 
             return table._tbl
 
@@ -1431,11 +1602,13 @@ class DocxTemplateRender(object):
 
         # CSV文件占位符映射
         for csv_info in resources.get("csv_files", []):
+            resource_type = csv_info.get("type", "content")
             placeholder_map[csv_info["placeholder"]] = {
-                "type": "csv",
+                "type": "markdown_table" if resource_type == "markdown_table" else "csv",
                 "file_name": csv_info.get("file_name", "未知CSV文件"),
                 "table_data": csv_info.get("table_data", []),
-                "resource_type": csv_info.get("type", "content"),
+                "alignments": csv_info.get("alignments", None),
+                "resource_type": resource_type,
             }
 
         # Markdown表格占位符映射

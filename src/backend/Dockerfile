@@ -22,4 +22,4 @@ RUN uv pip compile pyproject.toml --upgrade --output-file requirements.txt && \
 RUN patch -N --batch -p1 < /app/bisheng/patches/langchain_openai.patch /usr/local/lib/python3.10/site-packages/langchain_openai/chat_models/base.py || true
 
 
-CMD ["sh entrypoint.sh"]
+CMD ["sh", "entrypoint.sh"]

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+.DS_Store
+._*
+.docker_temp_*
+*.tar
+
+.git/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
